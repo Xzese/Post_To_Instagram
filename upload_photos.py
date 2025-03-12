@@ -44,62 +44,9 @@ def business_id_check():
             dotenv.set_key('.env',"IG_BUSINESS_USER_ID", os.environ["IG_BUSINESS_USER_ID"])
             return True
         else:
-            add_to_log("Error Update User ID:" + response.text)
+            add_to_log("Errorr Update User ID:" + response.text)
             return False
 
-def create_media_container(image_url, caption):
-    if len(os.getenv('IG_BUSINESS_USER_ID')) == 0:
-        if not business_id_check():
-            add_to_log("No Valid Business ID")
-            return
-    if os.getenv('ACCESS_TOKEN') is not None and os.getenv('ACCESS_TOKEN') != '' and os.getenv('ACCESS_TOKEN_EXPIRY') is not None and os.getenv('ACCESS_TOKEN_EXPIRY') != '' and datetime.datetime.strptime(os.getenv('ACCESS_TOKEN_EXPIRY'), '%Y-%m-%d %H:%M:%S.%f') > datetime.datetime.now():
-        endpoint_url = 'https://graph.facebook.com/v20.0/' + os.getenv('IG_BUSINESS_USER_ID') + '/media'
-        params = {
-            'image_url': image_url,
-            'caption':caption,
-            'access_token': os.getenv('ACCESS_TOKEN')
-        }
-        # Send a GET request to the endpoint URL with the parameters
-        response = requests.post(endpoint_url, params=params)
-        
-        # Check if the request was successful (status code 200)
-        if response.status_code == 200:
-            add_to_log("Created media container: " + response.json()['id'])
-            return response.json()['id']
-        else:
-            # Print the error message if the request was not successful
-            add_to_log("Error Creating Media Container:" + response.text)
-            return None
-    else:
-        return "No Valid Token"
-    
-def publish_media_container(creation_id):
-    if len(os.getenv('IG_BUSINESS_USER_ID')) == 0:
-        if not business_id_check():
-            add_to_log("No Valid Business ID")
-            return
-    if os.getenv('ACCESS_TOKEN') is not None and os.getenv('ACCESS_TOKEN') != '' and os.getenv('ACCESS_TOKEN_EXPIRY') is not None and os.getenv('ACCESS_TOKEN_EXPIRY') != '' and datetime.datetime.strptime(os.getenv('ACCESS_TOKEN_EXPIRY'), '%Y-%m-%d %H:%M:%S.%f') > datetime.datetime.now():
-        endpoint_url = 'https://graph.facebook.com/v20.0/' + os.getenv('IG_BUSINESS_USER_ID') + '/media_publish'
-        params = {
-            'creation_id': creation_id,
-            'access_token': os.getenv('ACCESS_TOKEN')
-        }
-        # Send a GET request to the endpoint URL with the parameters
-        response = requests.post(endpoint_url, params=params)
-        # Check if the request was successful (status code 200)
-        if response.status_code == 200:
-            add_to_log("Published media container: " + creation_id)
-            return response.json()
-        else:
-            # Print the error message if the request was not successful
-            add_to_log("Error publishing media container:" + response.text)
-            send_email_alert("[Instagram AI Image] Facebook Token Issue", "There has been an Error:  " + response.text)
-            return None
-    else:
-        add_to_log("No Valid Facebook Token")
-        send_email_alert("[Instagram AI Image] Facebook Token Expired", "There has been an Error: Your Facebook Token Expired on " + os.getenv('ACCESS_TOKEN_EXPIRY'))
-        return "No Valid Token"
-    
 def upload_to_imgbb(image_path):
     if os.getenv('IMGBB_API_KEY') is not None and os.getenv('IMGBB_API_KEY') != '':
 
@@ -124,18 +71,73 @@ def upload_to_imgbb(image_path):
             add_to_log("Uploaded image to imgbb: " + image_path)
             return response.json()['data']['image']['url']
         else:
-            # Print the error message if the request was not successful
-            add_to_log("Error Uploading Image: " + response.text)
-            return None
+            # raise the error message if the request was not successful
+            error_message = f"Error Uploading Image: {response.text}"
+            add_to_log(error_message)
+            raise Exception(error_message)
     else:
-        send_email_alert("[Instagram AI Image] No Valid IMGBB API Key", "There has been an Error: No Valid IMGBB API Key")
-        return "No Valid IMGBB API Key"
+        error_message = "No Valid IMGBB API Key"
+        raise Exception(error_message)
+
+def create_media_container(image_url, caption):
+    if len(os.getenv('IG_BUSINESS_USER_ID')) == 0:
+        if not business_id_check():
+            add_to_log("No Valid Business ID")
+            return
+    if os.getenv('ACCESS_TOKEN') is not None and os.getenv('ACCESS_TOKEN') != '' and os.getenv('ACCESS_TOKEN_EXPIRY') is not None and os.getenv('ACCESS_TOKEN_EXPIRY') != '' and datetime.datetime.strptime(os.getenv('ACCESS_TOKEN_EXPIRY'), '%Y-%m-%d %H:%M:%S.%f') > datetime.datetime.now():
+        endpoint_url = 'https://graph.facebook.com/v20.0/' + os.getenv('IG_BUSINESS_USER_ID') + '/media'
+        params = {
+            'image_url': image_url,
+            'caption':caption,
+            'access_token': os.getenv('ACCESS_TOKEN')
+        }
+        # Send a GET request to the endpoint URL with the parameters
+        response = requests.post(endpoint_url, params=params)
+        
+        # Check if the request was successful (status code 200)
+        if response.status_code == 200:
+            add_to_log("Created media container: " + response.json()['id'])
+            return response.json()['id']
+        else:
+            # raise the error message if the request was not successful
+            error_message = f"Error Creating Media Container: {response.text}"
+            add_to_log(error_message)
+            raise Exception(error_message)
+    else:
+        return "No Valid Token"
+    
+def publish_media_container(creation_id):
+    if len(os.getenv('IG_BUSINESS_USER_ID')) == 0:
+        if not business_id_check():
+            add_to_log("No Valid Business ID")
+            return
+    if os.getenv('ACCESS_TOKEN') is not None and os.getenv('ACCESS_TOKEN') != '' and os.getenv('ACCESS_TOKEN_EXPIRY') is not None and os.getenv('ACCESS_TOKEN_EXPIRY') != '' and datetime.datetime.strptime(os.getenv('ACCESS_TOKEN_EXPIRY'), '%Y-%m-%d %H:%M:%S.%f') > datetime.datetime.now():
+        endpoint_url = 'https://graph.facebook.com/v20.0/' + os.getenv('IG_BUSINESS_USER_ID') + '/media_publish'
+        params = {
+            'creation_id': creation_id,
+            'access_token': os.getenv('ACCESS_TOKEN')
+        }
+        # Send a GET request to the endpoint URL with the parameters
+        response = requests.post(endpoint_url, params=params)
+        # Check if the request was successful (status code 200)
+        if response.status_code == 200:
+            add_to_log("Published media container: " + creation_id)
+            return response.json()
+        else:
+            # raise the error message if the request was not successful
+            error_message = f"Error Publishing Media Container: {response.text}"
+            add_to_log(error_message)
+            raise Exception(error_message)
+    else:
+        error_message = "No Valid Facebook Token"
+        add_to_log(error_message)
+        raise Exception(error_message)
 
 def post_random_photo(file_path, caption):
     if os.path.isfile(file_path):
         max_retries = 3
         attempt = 0
-        while max_retries < 5:
+        while attempt < max_retries:
             try:
                 upload_url = upload_to_imgbb(file_path)
                 container_id = create_media_container(upload_url, caption)
@@ -147,6 +149,11 @@ def post_random_photo(file_path, caption):
             except Exception as e:
                 attempt += 1
                 add_to_log(f"Attempt {attempt} failed: {e}")
+                if attempt == max_retries:
+                    send_email_alert(
+                        "[Instagram AI Image] Posting Failed",
+                        f"The following error occurred after {max_retries} attempts: {e}"
+                    )
     else:
         add_to_log("Image file path not valid: " + file_path)
 
