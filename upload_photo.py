@@ -148,11 +148,11 @@ def post_random_photo(file_path, caption):
                 break
             except Exception as e:
                 attempt += 1
-                add_to_log(f"Attempt {attempt} failed: {e}")
+                add_to_log(f"Attempt {attempt} failed: {e}\nFile Path: {file_path}")
                 if attempt == max_retries:
                     send_email_alert(
                         "[Instagram AI Image] Posting Failed",
-                        f"The following error occurred after {max_retries} attempts: {e}"
+                        f"The following error occurred after {max_retries} attempts: {e}\nFile Path: {file_path}"
                     )
     else:
         add_to_log("Image file path not valid: " + file_path)
