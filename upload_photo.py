@@ -57,7 +57,7 @@ def upload_to_imgbb(image_path):
 
         params = {
             'key': os.getenv('IMGBB_API_KEY'),
-            'expiration':300
+            'expiration': 60 * 60 * 24
         }
 
         form_data = {
