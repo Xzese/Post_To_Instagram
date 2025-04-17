@@ -3,7 +3,7 @@
 This Python script automates posting random images to an Instagram business account using Facebook's Graph API. It uploads images to ImgBB temporarily, then publishes them on Instagram. It also logs actions and sends email notifications in case of errors.
 
 ## Features
-- Automatically uploads images to ImgBB.
+- Automatically uploads images to IMGBB or THUMBSNAP.
 - Posts images to Instagram via Facebook Graph API.
 - Logs operations with timestamps.
 - Sends email alerts for critical issues.
@@ -37,7 +37,8 @@ Add these variables to your `.env` file:
 ACCESS_TOKEN=
 ACCESS_TOKEN_EXPIRY=
 IG_BUSINESS_USER_ID=
-IMGBB_API_KEY=
+IMAGE_UPLOAD_API_KEY=
+IMAGE_UPLOAD_PROVIDER= #0 for IMGBB, 1 for THUMBSNAP - Defaults to 0
 LOG_FILE=
 SMTP_SERVER=
 SMTP_PORT=
@@ -50,7 +51,7 @@ RECIPIENT_EMAIL=
 - **ACCESS_TOKEN**: Facebook Graph API access token.
 - **ACCESS_TOKEN_EXPIRY**: Expiry datetime of the access token (`YYYY-MM-DD HH:MM:SS.%f`).
 - **IG_BUSINESS_USER_ID**: Instagram Business account ID (auto-fetched if empty).
-- **IMGBB_API_KEY**: ImgBB API key for temporary image uploads.
+- **IMAGE_UPLOAD_API_KEY**: ImgBB API key for temporary image uploads.
 - **LOG_FILE**: Path to store the log file (e.g., `/var/log/insta_bot/log.txt`).
 - **SMTP_SERVER**: SMTP server address for sending email alerts.
 - **SMTP_PORT**: SMTP server port.

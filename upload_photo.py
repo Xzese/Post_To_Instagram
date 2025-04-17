@@ -47,37 +47,36 @@ def business_id_check():
             add_to_log("Errorr Update User ID:" + response.text)
             return False
 
-def upload_to_imgbb(image_path):
-    if os.getenv('IMGBB_API_KEY') is not None and os.getenv('IMGBB_API_KEY') != '':
+def upload_image(image_path):
+    api_key = os.getenv('IMAGE_UPLOAD_API_KEY')
+    image_provider = int(os.getenv('IMAGE_UPLOAD_PROVIDER', '0'))
 
-        with open(image_path, 'rb') as image_file:
-            binary_data = image_file.read()
-        
-        endpoint_url = 'https://api.imgbb.com/1/upload'
+    if not api_key:
+        raise Exception("No Valid API Key")
 
-        params = {
-            'key': os.getenv('IMGBB_API_KEY'),
-            'expiration': 60 * 60 * 24
-        }
+    with open(image_path, 'rb') as image_file:
+        files = {'media': image_file}
+        data = {'key': api_key}
 
-        form_data = {
-            'image': binary_data
-        }
-        # Send a GET request to the endpoint URL with the parameters
-        response = requests.post(endpoint_url, params=params, files=form_data)
-        
-        # Check if the request was successful (status code 200)
-        if response.status_code == 200:
-            add_to_log("Uploaded image to imgbb: " + image_path)
-            return response.json()['data']['image']['url']
+        if image_provider == 1:
+            endpoint_url = 'https://thumbsnap.com/api/upload'
         else:
-            # raise the error message if the request was not successful
-            error_message = f"Error Uploading Image: {response.text}"
-            add_to_log(error_message)
-            raise Exception(error_message)
+            endpoint_url = 'https://api.imgbb.com/1/upload'
+            data['expiration'] = 60 * 60 * 24  # 24 hours
+
+        response = requests.post(endpoint_url, data=data, files=files)
+
+    if response.status_code == 200:
+        json_response = response.json()
+        if json_response.get('success'):
+            if image_provider == 1:
+                return json_response['data']['media']
+            else:
+                return json_response['data']['image']['url']
+        else:
+            raise Exception(f"Upload failed: {json_response.get('error', {}).get('message', 'Unknown error')}")
     else:
-        error_message = "No Valid IMGBB API Key"
-        raise Exception(error_message)
+        raise Exception(f"Error Uploading Image to Provider: {"IMGBB" if image_provider == 0 else "THUMBSNAP" if image_provider == 1 else "Not Found"}; {response.text}")
 
 def create_media_container(image_url, caption):
     if len(os.getenv('IG_BUSINESS_USER_ID')) == 0:
@@ -139,7 +138,7 @@ def post_random_photo(file_path, caption):
         attempt = 0
         while attempt < max_retries:
             try:
-                upload_url = upload_to_imgbb(file_path)
+                upload_url = upload_image(file_path)
                 container_id = create_media_container(upload_url, caption)
                 response = publish_media_container(container_id)
                 if response == "No Valid Token" or response == None:
