@@ -11,7 +11,7 @@ This Python script automates posting random images to an Instagram business acco
 ## Requirements
 - Python 3
 - Facebook Developer account and Instagram Business Account
-- ImgBB API key
+- S3 Object Storage
 - SMTP server for email notifications
 
 ## Installation

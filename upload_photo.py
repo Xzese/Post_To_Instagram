@@ -3,13 +3,12 @@ import os
 import requests
 import dotenv
 import datetime
-import json
-import random
 import datetime
-import time
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import boto3
+import regex as re
 
 __all__ = ['post_random_photo']
 
@@ -48,36 +47,48 @@ def business_id_check():
             return False
 
 def upload_image(image_path):
-    api_key = os.getenv('IMAGE_UPLOAD_API_KEY')
-    image_provider = int(os.getenv('IMAGE_UPLOAD_PROVIDER', '0'))
+    bucket = os.getenv("S3_BUCKET_NAME")
+    s3_access_key_id = os.getenv("S3_ACCESS_KEY_ID")
+    s3_secret_access_key = os.getenv("S3_SECRET_ACCESS_KEY")
+    s3_endpoint_url = os.getenv("S3_ENDPOINT")
 
-    if not api_key:
-        raise Exception("No Valid API Key")
+    if not all([s3_access_key_id, s3_secret_access_key, s3_endpoint_url, bucket]):
+        raise Exception("Missing S3 configuration in environment variables.")
 
-    with open(image_path, 'rb') as image_file:
-        files = {'media': image_file}
-        data = {'key': api_key}
+    raw_file_name = os.path.basename(image_path)
+    file_name = re.sub(r"[^A-Za-z0-9_-]", "_", str(raw_file_name)).lower()
 
-        if image_provider == 1:
-            endpoint_url = 'https://thumbsnap.com/api/upload'
-        else:
-            endpoint_url = 'https://api.imgbb.com/1/upload'
-            data['expiration'] = 60 * 60 * 24  # 24 hours
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=s3_endpoint_url,
+        aws_access_key_id=s3_access_key_id,
+        aws_secret_access_key=s3_secret_access_key,
+        region_name="auto",  # R2 ignores this, can be any string
+    )
 
-        response = requests.post(endpoint_url, data=data, files=files)
+    try:
+        s3.upload_file(image_path, bucket, file_name)
+        print(f"Uploaded {image_path} to {file_name}")
+        # Generate a presigned URL for the uploaded object
+        try:
+            expiry = 60 * 60
+            presigned_url = s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": bucket, "Key": file_name},
+                ExpiresIn=expiry,
+            )
+            print(
+                f"Presigned URL Created for {file_name}. Presigned URL: {presigned_url}"
+            )
 
-    if response.status_code == 200:
-        json_response = response.json()
-        if json_response.get('success'):
-            if image_provider == 1:
-                return json_response['data']['media']
-            else:
-                return json_response['data']['image']['url']
-        else:
-            raise Exception(f"Upload failed: {json_response.get('error', {}).get('message', 'Unknown error')}")
-    else:
-        raise Exception(f"Error Uploading Image to Provider: {"IMGBB" if image_provider == 0 else "THUMBSNAP" if image_provider == 1 else "Not Found"}; {response.text}")
-
+            return presigned_url
+        except Exception as e:
+            print(f"Error generating presigned URL: {e}", "ERROR")
+            raise Exception("Error generating presigned URL.")
+    except Exception as e:
+        print(f"Upload Failed: {e}", "ERROR")
+        raise Exception("Upload Failed.")
+    
 def create_media_container(image_url, caption):
     if len(os.getenv('IG_BUSINESS_USER_ID')) == 0:
         if not business_id_check():
