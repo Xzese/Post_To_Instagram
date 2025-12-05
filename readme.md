@@ -3,7 +3,7 @@
 This Python script automates posting random images to an Instagram business account using Facebook's Graph API. It uploads images to ImgBB temporarily, then publishes them on Instagram. It also logs actions and sends email notifications in case of errors.
 
 ## Features
-- Automatically uploads images to IMGBB or THUMBSNAP.
+- Automatically uploads images to S3 Object Storage.
 - Posts images to Instagram via Facebook Graph API.
 - Logs operations with timestamps.
 - Sends email alerts for critical issues.
