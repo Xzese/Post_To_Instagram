@@ -3,7 +3,7 @@ import os
 import requests
 import dotenv
 import datetime
-import datetime
+import time
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -127,12 +127,20 @@ def publish_media_container(creation_id):
             'creation_id': creation_id,
             'access_token': os.getenv('ACCESS_TOKEN')
         }
-        # Send a GET request to the endpoint URL with the parameters
-        response = requests.post(endpoint_url, params=params)
-        # Check if the request was successful (status code 200)
-        if response.status_code == 200:
-            add_to_log("Published media container: " + creation_id)
-            return response.json()
+        publish_attempt = 0
+        max_publish_attempts = 6
+        publish_attempt_backoff = 2
+
+        while publish_attempt < max_publish_attempts:
+            # Send a GET request to the endpoint URL with the parameters
+            response = requests.post(endpoint_url, params=params)
+            # Check if the request was successful (status code 200)
+            if response.status_code == 200:
+                add_to_log("Published media container: " + creation_id)
+                return response.json()
+            else:
+                publish_attempt += 1
+                time.sleep(publish_attempt_backoff ** publish_attempt)
         else:
             # raise the error message if the request was not successful
             error_message = f"Error Publishing Media Container: {response.text}"
