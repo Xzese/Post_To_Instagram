@@ -16,10 +16,15 @@ dotenv.load_dotenv()
 
 def add_to_log(message):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_file = os.getenv('LOG_FILE')
+    log_file = (os.getenv("LOG_FILE") or "").strip()
 
     # Ensure parent directories exist
-    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    if not log_file:
+        raise ValueError("LOG_FILE is required for logging.")
+
+    log_dir = os.path.dirname(log_file)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
 
     with open(log_file, 'a') as f:
         f.write(f'[{timestamp}] {message}\n')
@@ -27,7 +32,7 @@ def add_to_log(message):
 
 def business_id_check():
     #get Business Account ID if missing
-    if len(os.getenv('IG_BUSINESS_USER_ID')) == 0:
+    if not os.getenv("IG_BUSINESS_USER_ID"):
         endpoint_url = 'https://graph.facebook.com/v19.0/me/accounts'
         params = {
             'fields': 'instagram_business_account{id,username}',
@@ -90,11 +95,20 @@ def upload_image(image_path):
         raise Exception("Upload Failed.")
     
 def create_media_container(image_url, caption):
-    if len(os.getenv('IG_BUSINESS_USER_ID')) == 0:
+    if not os.getenv("IG_BUSINESS_USER_ID"):
         if not business_id_check():
             add_to_log("No Valid Business ID")
             return
-    if os.getenv('ACCESS_TOKEN') is not None and os.getenv('ACCESS_TOKEN') != '' and os.getenv('ACCESS_TOKEN_EXPIRY') is not None and os.getenv('ACCESS_TOKEN_EXPIRY') != '' and datetime.datetime.strptime(os.getenv('ACCESS_TOKEN_EXPIRY'), '%Y-%m-%d %H:%M:%S.%f') > datetime.datetime.now():
+    access_token = os.getenv('ACCESS_TOKEN')
+    access_token_expiry = os.getenv('ACCESS_TOKEN_EXPIRY')
+
+    if (
+        access_token is not None
+        and access_token != ""
+        and access_token_expiry is not None
+        and access_token_expiry != ""
+        and datetime.datetime.strptime(access_token_expiry, '%Y-%m-%d %H:%M:%S.%f') > datetime.datetime.now()
+    ):
         endpoint_url = 'https://graph.facebook.com/v20.0/' + os.getenv('IG_BUSINESS_USER_ID') + '/media'
         params = {
             'image_url': image_url,
@@ -117,11 +131,20 @@ def create_media_container(image_url, caption):
         return "No Valid Token"
     
 def publish_media_container(creation_id):
-    if len(os.getenv('IG_BUSINESS_USER_ID')) == 0:
+    if not os.getenv("IG_BUSINESS_USER_ID"):
         if not business_id_check():
             add_to_log("No Valid Business ID")
             return
-    if os.getenv('ACCESS_TOKEN') is not None and os.getenv('ACCESS_TOKEN') != '' and os.getenv('ACCESS_TOKEN_EXPIRY') is not None and os.getenv('ACCESS_TOKEN_EXPIRY') != '' and datetime.datetime.strptime(os.getenv('ACCESS_TOKEN_EXPIRY'), '%Y-%m-%d %H:%M:%S.%f') > datetime.datetime.now():
+    access_token = os.getenv('ACCESS_TOKEN')
+    access_token_expiry = os.getenv('ACCESS_TOKEN_EXPIRY')
+
+    if (
+        access_token is not None
+        and access_token != ""
+        and access_token_expiry is not None
+        and access_token_expiry != ""
+        and datetime.datetime.strptime(access_token_expiry, '%Y-%m-%d %H:%M:%S.%f') > datetime.datetime.now()
+    ):
         endpoint_url = 'https://graph.facebook.com/v20.0/' + os.getenv('IG_BUSINESS_USER_ID') + '/media_publish'
         params = {
             'creation_id': creation_id,
@@ -160,7 +183,7 @@ def post_random_photo(file_path, caption):
                 upload_url = upload_image(file_path)
                 container_id = create_media_container(upload_url, caption)
                 response = publish_media_container(container_id)
-                if response == "No Valid Token" or response == None:
+                if response == "No Valid Token" or response is None:
                     break
                 add_to_log("Posted image ID: "+ file_path)
                 break
@@ -197,4 +220,4 @@ def send_email_alert(subject, body):
 
         add_to_log("Email alert sent with subject: " + subject)
     except Exception as e:
-        add_to_log('Error sending email notification:', e)
+        add_to_log(f"Error sending email notification: {e}")
