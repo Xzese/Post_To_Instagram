@@ -1,5 +1,12 @@
 # Instagram Automation Script
 
+<p align="center">
+  <a href="https://github.com/Xzese/Post_To_Instagram/stargazers"><img src="https://img.shields.io/github/stars/Xzese/Post_To_Instagram?style=flat-square" alt="Stars"></a>
+  <a href="https://github.com/Xzese/Post_To_Instagram/commits/main"><img src="https://img.shields.io/github/last-commit/Xzese/Post_To_Instagram?style=flat-square" alt="Last commit"></a>
+  <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
+  <a href="https://github.com/Xzese/Post_To_Instagram/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
+</p>
+
 This Python script automates posting random images to an Instagram business account using Facebook's Graph API. It uploads images to S3-compatible object storage (including Cloudflare R2), then publishes them on Instagram. It also logs actions and sends email notifications in case of errors.
 
 ## Features
