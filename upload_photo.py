@@ -1,223 +1,200 @@
 #!/usr/bin/env python3
+"""Single-attempt Instagram publishing. Never retry an uncertain publication."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from email.message import EmailMessage
+import logging
+import mimetypes
 import os
-import requests
-import dotenv
-import datetime
-import time
+from pathlib import Path
+import re
 import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-import boto3
-import regex as re
+import ssl
+from uuid import uuid4
 
-__all__ = ['post_random_photo']
+import requests
 
-dotenv.load_dotenv()
+LOGGER = logging.getLogger(__name__)
+REQUEST_TIMEOUT = (5, 30)
+__all__ = ["publish_image", "post_random_photo", "PublishResult", "PublishingError", "PublishOutcomeUnknown"]
 
-def add_to_log(message):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_file = (os.getenv("LOG_FILE") or "").strip()
 
-    # Ensure parent directories exist
-    if not log_file:
-        raise ValueError("LOG_FILE is required for logging.")
+class PublishingError(RuntimeError):
+    """The operation failed. This exception does not authorise a retry."""
 
-    log_dir = os.path.dirname(log_file)
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
 
-    with open(log_file, 'a') as f:
-        f.write(f'[{timestamp}] {message}\n')
-    print(f'[{timestamp}] {message}\n')
+class PublishOutcomeUnknown(PublishingError):
+    """The provider may have published. Reconcile before trying again."""
 
-def business_id_check():
-    #get Business Account ID if missing
-    if not os.getenv("IG_BUSINESS_USER_ID"):
-        endpoint_url = 'https://graph.facebook.com/v19.0/me/accounts'
-        params = {
-            'fields': 'instagram_business_account{id,username}',
-            'access_token': os.getenv('ACCESS_TOKEN')
-        }
-        response = requests.get(endpoint_url, params=params)
+    def __init__(self, creation_id: str):
+        self.creation_id = creation_id
+        super().__init__("Publication outcome is unknown; reconcile the existing container before retrying.")
 
-        # Check if the request was successful (status code 200)
-        if response.status_code == 200:
-            # Parse the JSON response
-            ig_business_account = response.json()
-            os.environ['IG_BUSINESS_USER_ID'] = ig_business_account['data'][0]['instagram_business_account']['id']
-            dotenv.set_key('.env',"IG_BUSINESS_USER_ID", os.environ["IG_BUSINESS_USER_ID"])
-            return True
-        else:
-            add_to_log("Errorr Update User ID:" + response.text)
-            return False
 
-def upload_image(image_path):
-    bucket = os.getenv("S3_BUCKET_NAME")
-    s3_access_key_id = os.getenv("S3_ACCESS_KEY_ID")
-    s3_secret_access_key = os.getenv("S3_SECRET_ACCESS_KEY")
-    s3_endpoint_url = os.getenv("S3_ENDPOINT")
+@dataclass(frozen=True)
+class PublishResult:
+    media_id: str
+    creation_id: str
 
-    if not all([s3_access_key_id, s3_secret_access_key, s3_endpoint_url, bucket]):
-        raise Exception("Missing S3 configuration in environment variables.")
 
-    raw_file_name = os.path.basename(image_path)
-    file_name = re.sub(r"[^A-Za-z0-9_-]", "_", str(raw_file_name)).lower()
+def _required(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise PublishingError(f"{name} is required.")
+    return value
 
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=s3_endpoint_url,
-        aws_access_key_id=s3_access_key_id,
-        aws_secret_access_key=s3_secret_access_key,
-        region_name="auto",  # R2 ignores this, can be any string
+
+def _graph_base() -> str:
+    version = _required("GRAPH_API_VERSION")
+    if not re.fullmatch(r"v[1-9][0-9]*\.[0-9]+", version):
+        raise PublishingError("GRAPH_API_VERSION must have the form vNN.N.")
+    return f"https://graph.facebook.com/{version}"
+
+
+def _token() -> str:
+    token = _required("ACCESS_TOKEN")
+    try:
+        expiry = datetime.fromisoformat(_required("ACCESS_TOKEN_EXPIRY").replace("Z", "+00:00"))
+        # Existing .env files use local, naive timestamps. Preserve that meaning.
+        if expiry.tzinfo is None:
+            expiry = expiry.astimezone()
+        if expiry <= datetime.now().astimezone():
+            raise PublishingError("The Facebook access token has expired.")
+    except ValueError:
+        raise PublishingError("ACCESS_TOKEN_EXPIRY must be an ISO datetime.") from None
+    return token
+
+
+def _account() -> str:
+    account = _required("IG_BUSINESS_USER_ID")
+    if not account.isascii() or not account.isdigit():
+        raise PublishingError("IG_BUSINESS_USER_ID must be a numeric account ID.")
+    return account
+
+
+def business_id_check() -> bool:
+    """Require explicit account selection. Never silently select the first account."""
+    _account()
+    return True
+
+
+def add_to_log(message: str) -> None:
+    LOGGER.info(message)
+
+
+def _best_effort_log(message: str) -> None:
+    try:
+        add_to_log(message)
+    except Exception:
+        # A local logger must not change the result of a remote side effect.
+        pass
+
+
+def upload_image(image_path: str) -> str:
+    import boto3
+    from botocore.config import Config
+
+    path = Path(image_path)
+    if not path.is_file() or path.stat().st_size == 0:
+        raise PublishingError("A non-empty image file is required.")
+    bucket = _required("S3_BUCKET_NAME")
+    client = boto3.client(
+        "s3", endpoint_url=_required("S3_ENDPOINT"),
+        aws_access_key_id=_required("S3_ACCESS_KEY_ID"),
+        aws_secret_access_key=_required("S3_SECRET_ACCESS_KEY"), region_name="auto",
+        config=Config(connect_timeout=5, read_timeout=30, retries={"max_attempts": 2}),
     )
-
+    key = f"instagram/{uuid4().hex}{path.suffix.lower()}"
+    content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     try:
-        s3.upload_file(image_path, bucket, file_name)
-        print(f"Uploaded {image_path} to {file_name}")
-        # Generate a presigned URL for the uploaded object
-        try:
-            expiry = 60 * 60
-            presigned_url = s3.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": bucket, "Key": file_name},
-                ExpiresIn=expiry,
-            )
-            print(
-                f"Presigned URL Created for {file_name}. Presigned URL: {presigned_url}"
-            )
+        client.upload_file(str(path), bucket, key, ExtraArgs={"ContentType": content_type})
+        return client.generate_presigned_url("get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600)
+    except Exception:
+        # Do not leak signed request URLs, credentials or SDK response bodies.
+        raise PublishingError("Object upload or signing failed.") from None
 
-            return presigned_url
-        except Exception as e:
-            print(f"Error generating presigned URL: {e}", "ERROR")
-            raise Exception("Error generating presigned URL.")
-    except Exception as e:
-        print(f"Upload Failed: {e}", "ERROR")
-        raise Exception("Upload Failed.")
-    
-def create_media_container(image_url, caption):
-    if not os.getenv("IG_BUSINESS_USER_ID"):
-        if not business_id_check():
-            add_to_log("No Valid Business ID")
-            return
-    access_token = os.getenv('ACCESS_TOKEN')
-    access_token_expiry = os.getenv('ACCESS_TOKEN_EXPIRY')
 
-    if (
-        access_token is not None
-        and access_token != ""
-        and access_token_expiry is not None
-        and access_token_expiry != ""
-        and datetime.datetime.strptime(access_token_expiry, '%Y-%m-%d %H:%M:%S.%f') > datetime.datetime.now()
-    ):
-        endpoint_url = 'https://graph.facebook.com/v20.0/' + os.getenv('IG_BUSINESS_USER_ID') + '/media'
-        params = {
-            'image_url': image_url,
-            'caption':caption,
-            'access_token': os.getenv('ACCESS_TOKEN')
-        }
-        # Send a GET request to the endpoint URL with the parameters
-        response = requests.post(endpoint_url, params=params)
-        
-        # Check if the request was successful (status code 200)
-        if response.status_code == 200:
-            add_to_log("Created media container: " + response.json()['id'])
-            return response.json()['id']
-        else:
-            # raise the error message if the request was not successful
-            error_message = f"Error Creating Media Container: {response.text}"
-            add_to_log(error_message)
-            raise Exception(error_message)
-    else:
-        return "No Valid Token"
-    
-def publish_media_container(creation_id):
-    if not os.getenv("IG_BUSINESS_USER_ID"):
-        if not business_id_check():
-            add_to_log("No Valid Business ID")
-            return
-    access_token = os.getenv('ACCESS_TOKEN')
-    access_token_expiry = os.getenv('ACCESS_TOKEN_EXPIRY')
-
-    if (
-        access_token is not None
-        and access_token != ""
-        and access_token_expiry is not None
-        and access_token_expiry != ""
-        and datetime.datetime.strptime(access_token_expiry, '%Y-%m-%d %H:%M:%S.%f') > datetime.datetime.now()
-    ):
-        endpoint_url = 'https://graph.facebook.com/v20.0/' + os.getenv('IG_BUSINESS_USER_ID') + '/media_publish'
-        params = {
-            'creation_id': creation_id,
-            'access_token': os.getenv('ACCESS_TOKEN')
-        }
-        publish_attempt = 0
-        max_publish_attempts = 6
-        publish_attempt_backoff = 2
-
-        while publish_attempt < max_publish_attempts:
-            # Send a GET request to the endpoint URL with the parameters
-            response = requests.post(endpoint_url, params=params)
-            # Check if the request was successful (status code 200)
-            if response.status_code == 200:
-                add_to_log("Published media container: " + creation_id)
-                return response.json()
-            else:
-                publish_attempt += 1
-                time.sleep(publish_attempt_backoff ** publish_attempt)
-        else:
-            # raise the error message if the request was not successful
-            error_message = f"Error Publishing Media Container: {response.text}"
-            add_to_log(error_message)
-            raise Exception(error_message)
-    else:
-        error_message = "No Valid Facebook Token"
-        add_to_log(error_message)
-        raise Exception(error_message)
-
-def post_random_photo(file_path, caption):
-    if os.path.isfile(file_path):
-        max_retries = 3
-        attempt = 0
-        while attempt < max_retries:
-            try:
-                upload_url = upload_image(file_path)
-                container_id = create_media_container(upload_url, caption)
-                response = publish_media_container(container_id)
-                if response == "No Valid Token" or response is None:
-                    break
-                add_to_log("Posted image ID: "+ file_path)
-                break
-            except Exception as e:
-                attempt += 1
-                add_to_log(f"Attempt {attempt} failed: {e}\nFile Path: {file_path}")
-                if attempt == max_retries:
-                    send_email_alert(
-                        "[Instagram AI Image] Posting Failed",
-                        f"The following error occurred after {max_retries} attempts: {e}\nFile Path: {file_path}"
-                    )
-    else:
-        add_to_log("Image file path not valid: " + file_path)
-
-def send_email_alert(subject, body):
+def create_media_container(image_url: str, caption: str) -> str:
+    url = f"{_graph_base()}/{_account()}/media"
+    token = _token()
     try:
-        # Connect to SMTP server
-        server = smtplib.SMTP(os.getenv('SMTP_SERVER'), os.getenv('SMTP_PORT'))
-        server.starttls()
-        server.login(os.getenv('SENDER_EMAIL'), os.getenv('SENDER_PASSWORD'))
+        response = requests.post(url, data={"image_url": image_url, "caption": caption, "access_token": token}, timeout=REQUEST_TIMEOUT, allow_redirects=False)
+        if response.status_code != 200:
+            raise PublishingError(f"Media container creation failed (HTTP {response.status_code}).")
+        payload = response.json()
+        identifier = payload.get("id") if isinstance(payload, dict) else None
+        if not isinstance(identifier, str) or not identifier.strip():
+            raise PublishingError("Media container response has no valid ID.")
+        return identifier
+    except requests.RequestException:
+        raise PublishingError("Media container creation failed; no automatic retry was made.") from None
+    except ValueError:
+        raise PublishingError("Media container response is not valid JSON.") from None
 
-        # Compose email message
-        msg = MIMEMultipart()
-        msg['From'] = os.getenv('SENDER_EMAIL')
-        msg['To'] = os.getenv('RECIPIENT_EMAIL')
-        msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'plain'))
 
-        # Send email
-        server.sendmail(os.getenv('SENDER_EMAIL'), os.getenv('RECIPIENT_EMAIL'), msg.as_string())
+def publish_media_container(creation_id: str) -> dict:
+    if not isinstance(creation_id, str) or not creation_id.strip() or creation_id == "No Valid Token":
+        raise PublishingError("A valid media container ID is required.")
+    url = f"{_graph_base()}/{_account()}/media_publish"
+    token = _token()
+    try:
+        response = requests.post(url, data={"creation_id": creation_id, "access_token": token}, timeout=REQUEST_TIMEOUT, allow_redirects=False)
+    except requests.RequestException:
+        raise PublishOutcomeUnknown(creation_id) from None
+    if response.status_code >= 500 or 300 <= response.status_code < 400:
+        raise PublishOutcomeUnknown(creation_id)
+    if response.status_code != 200:
+        raise PublishingError(f"Publication was not confirmed (HTTP {response.status_code}); no automatic retry was made.")
+    try:
+        payload = response.json()
+    except ValueError:
+        raise PublishOutcomeUnknown(creation_id) from None
+    if not isinstance(payload, dict) or not isinstance(payload.get("id"), str) or not payload["id"].strip():
+        raise PublishOutcomeUnknown(creation_id)
+    _best_effort_log("Publication confirmed.")
+    return payload
 
-        # Close connection
-        server.quit()
 
-        add_to_log("Email alert sent with subject: " + subject)
-    except Exception as e:
-        add_to_log(f"Error sending email notification: {e}")
+def publish_image(file_path: str, caption: str) -> PublishResult:
+    """Publish once. The caller owns recovery and cross-invocation coordination."""
+    if not isinstance(caption, str):
+        raise PublishingError("The caption must be text.")
+    path = Path(file_path)
+    if not path.is_file() or path.stat().st_size == 0:
+        raise PublishingError("A non-empty image file is required.")
+    _graph_base()
+    _account()
+    _token()
+    for name in ("S3_BUCKET_NAME", "S3_ENDPOINT", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"):
+        _required(name)
+    image_url = upload_image(str(path))
+    container = create_media_container(image_url, caption)
+    payload = publish_media_container(container)
+    result = PublishResult(media_id=payload["id"], creation_id=container)
+    _best_effort_log("Image publishing completed.")
+    return result
+
+
+def post_random_photo(file_path: str, caption: str) -> PublishResult:
+    """Compatibility name. Returns a result or raises; it never silently fails."""
+    return publish_image(file_path, caption)
+
+
+def send_email_alert(subject: str, body: str) -> bool:
+    """Optional notification. Its failure must not cause another publication."""
+    try:
+        sender = _required("SENDER_EMAIL")
+        recipient = _required("RECIPIENT_EMAIL")
+        message = EmailMessage()
+        message["From"], message["To"], message["Subject"] = sender, recipient, subject
+        message.set_content(body)
+        with smtplib.SMTP(_required("SMTP_SERVER"), int(_required("SMTP_PORT")), timeout=10) as server:
+            server.starttls(context=ssl.create_default_context())
+            server.login(sender, _required("SENDER_PASSWORD"))
+            server.send_message(message)
+        return True
+    except Exception:
+        _best_effort_log("Email notification failed.")
+        return False

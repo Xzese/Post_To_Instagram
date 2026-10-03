@@ -1,103 +1,42 @@
-# Instagram Automation Script
+# Instagram image publishing
 
-<p align="center">
-  <a href="https://github.com/Xzese/Post_To_Instagram/stargazers"><img src="https://img.shields.io/github/stars/Xzese/Post_To_Instagram?style=flat-square" alt="Stars"></a>
-  <a href="https://github.com/Xzese/Post_To_Instagram/commits/main"><img src="https://img.shields.io/github/last-commit/Xzese/Post_To_Instagram?style=flat-square" alt="Last commit"></a>
-  <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
-  <a href="https://github.com/Xzese/Post_To_Instagram/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
-</p>
+Python integration for uploading an image to S3-compatible storage and publishing it to an Instagram business account.
 
-This Python script automates posting random images to an Instagram business account using Facebook's Graph API. It uploads images to S3-compatible object storage (including Cloudflare R2), then publishes them on Instagram. It also logs actions and sends email notifications in case of errors.
+## Development status
 
-## Features
+The `portfolio-modernisation` branch contains the first reliability implementation. Keep this PR in draft. Live Meta compatibility, media-container readiness polling, persistent operation ownership and recovery across process restarts are not complete.
 
-- Uploads images to S3-compatible object storage.
-- Posts images to Instagram via Facebook Graph API.
-- Logs operations with timestamps.
-- Sends email alerts for critical issues.
+## Setup
 
-## Requirements
+Use Python 3.11 or later. Clone this repository, create a virtual environment, and install `requirements.txt`. Copy `.env.example` to `.env` and set the values. Select a Graph API version supported by your Meta application; the code does not assume a current version.
 
-- Python 3
-- Facebook Developer account and Instagram Business Account
-- S3-compatible object storage
-- SMTP server for email notifications
-
-## Installation
-
-1. Clone this repository:
-
-```bash
-git clone <repository-url>
-cd <repository-folder>
-```
-
-2. Set up a virtual environment and install dependencies:
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-3. Create a `.env` file in the root folder and populate it with the required environment variables (listed below).
-
-## Environment Variables
-
-Add these variables to your `.env` file:
-
-```env
-ACCESS_TOKEN=
-ACCESS_TOKEN_EXPIRY=
-IG_BUSINESS_USER_ID=
-S3_BUCKET_NAME=
-S3_ACCESS_KEY_ID=
-S3_SECRET_ACCESS_KEY=
-S3_ENDPOINT=
-LOG_FILE=
-SMTP_SERVER=
-SMTP_PORT=
-SENDER_EMAIL=
-SENDER_PASSWORD=
-RECIPIENT_EMAIL=
-```
-
-### Explanation of Environment Variables
-
-- **ACCESS_TOKEN**: Facebook Graph API access token.
-- **ACCESS_TOKEN_EXPIRY**: Expiry datetime of the access token (`YYYY-MM-DD HH:MM:SS.%f`).
-- **IG_BUSINESS_USER_ID**: Instagram Business account ID (auto-fetched if empty).
-- **S3_BUCKET_NAME**: Name of the S3 bucket used for image uploads.
-- **S3_ACCESS_KEY_ID**: S3 access key ID.
-- **S3_SECRET_ACCESS_KEY**: S3 secret access key.
-- **S3_ENDPOINT**: S3 endpoint URL, including scheme.
-- **LOG_FILE**: Path to store the log file (for example, `/var/log/insta_bot/log.txt`).
-- **SMTP_SERVER**: SMTP server address for sending email alerts.
-- **SMTP_PORT**: SMTP server port.
-- **SENDER_EMAIL**: Sender's email address.
-- **SENDER_PASSWORD**: Sender's email password.
-- **RECIPIENT_EMAIL**: Recipient's email address for alerts.
-
-## Usage
-
-Import and use the `post_random_photo` function in your Python script:
+`IG_BUSINESS_USER_ID` is now required. The library does not select the first returned account. Importing the module does not load or write configuration.
 
 ```python
-from upload_photo import post_random_photo
+from dotenv import load_dotenv
+from upload_photo import publish_image, PublishOutcomeUnknown
 
-post_random_photo('path/to/image.jpg', 'Your Instagram caption here')
+load_dotenv()
+try:
+    result = publish_image("image.jpg", "Caption")
+    print(result.media_id)
+except PublishOutcomeUnknown as error:
+    # Inspect this existing container and the account before any manual retry.
+    print("Unconfirmed container:", error.creation_id)
 ```
 
-## Logging
+`post_random_photo` remains as a compatibility name. It now returns `PublishResult` or raises an exception. It no longer hides failures or retries the complete publishing sequence.
 
-Logs are saved at the path specified by the `LOG_FILE` environment variable. Logs include timestamps and statuses of script operations.
+## Safety boundaries
 
-## Troubleshooting
+A timeout, server error, redirect or malformed success response can leave the publication outcome unknown. No automatic publication retry is made. Logging and notification failures do not turn a confirmed publication into another attempt. Signed object URLs and raw provider response bodies are not logged.
 
-- Ensure the Facebook Graph API token is valid and not expired.
-- Confirm SMTP details are accurate for email alerts.
-- Check S3 credentials and bucket permissions if image uploads fail.
+These safeguards cover one invocation. They do not prevent another scheduler run or device from publishing the same image. Do not claim exactly-once delivery. Persistent coordination and reconciliation remain required before unattended use.
 
-## License
+Configure Python logging in the calling application. Optional email alerts use the `SMTP_*`, `SENDER_*` and `RECIPIENT_EMAIL` settings. No notification is sent automatically by `publish_image`.
 
-This project is licensed under the MIT License.
+## Tests
+
+Install pytest, then run `python -m pytest -q tests`. The first pass has 14 passing mocked tests. No live publishing or account calls were made. Full CI and provider integration checks remain pending.
+
+This change does not add or change a licence. The repository licence review remains open.

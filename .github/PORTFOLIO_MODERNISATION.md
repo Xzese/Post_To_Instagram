@@ -1,23 +1,24 @@
 # Publishing reliability modernisation
 
-Placeholder for making the Instagram publishing integration safer and easier to reuse.
+Status: implementation started; keep the PR in draft.
 
-## Scope
-- Separate object storage, Graph API access and publishing orchestration.
-- Replace mixed None/string/exception outcomes with explicit typed results.
-- Validate configuration and media before external side effects.
-- Add persistent operation state for upload, media-container and confirmed publish identifiers.
-- Distinguish known failure from uncertain remote outcome after timeouts.
-- Prevent logging or notification failures from causing a confirmed publish to be retried.
-- Classify retryable and permanent failures by operation.
-- Avoid automatic duplicate publication when a previous outcome cannot be established safely.
-- Stop logging signed object URLs or other sensitive values.
-- Use collision-resistant object keys.
-- Add focused tests for uncertain outcomes, authentication failure, duplicate invocation and post-success local failures.
-- Review Graph API version compatibility and make the supported version explicit.
-- Correct README clone instructions, API naming and licensing documentation.
+## Implemented in the first pass
+- Explicit PublishResult, PublishingError and PublishOutcomeUnknown types.
+- Preflight token, account, configuration and non-empty file checks.
+- One publishing attempt; no whole-operation or media-publish retry loops.
+- Logging failures cannot cause confirmed success to be published again.
+- Explicit account and Graph API version settings.
+- Connection/read timeouts, no automatic redirects, form-encoded POST secrets.
+- Collision-resistant storage keys, content type metadata and no signed-URL logging.
+- Optional bounded SMTP notification handling.
+- Fourteen mocked regression tests pass locally.
 
-## Portfolio outcome
-Show robust integration design around externally visible side effects, retries, observability and uncertain outcomes.
+## Remaining before release
+- Persistent operation ownership, cross-process/device coordination and reconciliation.
+- Verified media-container readiness polling and operation-specific retry policy.
+- Confirm the supported live Meta API version and permissions.
+- Broader media validation, storage lifecycle cleanup and integration tests.
+- Complete packaging, formatting, CI and licence review.
+- Coordinate consumers; the AI pipeline PR must pin this implementation before it uses publish_image.
 
-No implementation is included in this placeholder PR.
+No live Meta, storage or SMTP calls were made during validation. These tests do not prove exactly-once delivery or production readiness.
